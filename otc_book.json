@@ -1,0 +1,37 @@
+[
+  {
+    "counterparty": "IS Bank",
+    "underlying": "USD/TRY",
+    "opt_type": "call",
+    "position": "short",
+    "strike": 47.1,
+    "expiry_date": "2026-06-17",
+    "notional": 100000.0,
+    "trade_premium": 0.273,
+    "rate": 0.05,
+    "trade_date": "2026-05-18",
+    "spot_override": 45.5,
+    "vol_override": 8.18,
+    "id": "1acf7d1f",
+    "mtm_history": [
+      {
+        "date": "2026-05-20",
+        "spot": 45.54,
+        "vol": 0.0714,
+        "bs_price": 0.026229479315613258,
+        "daily_pnl": 0.0,
+        "cum_pnl": 27300.000000000004
+      },
+      {
+        "date": "2026-05-22",
+        "spot": 45.56,
+        "vol": 0.083,
+        "atm_vol": 0.2,
+        "bs_price": 0.04281812709992483,
+        "daily_pnl": 0.0,
+        "cum_pnl": 27300.000000000004
+      }
+    ],
+    "surface_atm_vol": 0.2
+  }
+]
