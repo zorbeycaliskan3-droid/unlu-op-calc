@@ -21,6 +21,15 @@ import uuid
 # --- matplotlib embedding ---
 import matplotlib
 matplotlib.use("TkAgg")
+
+# Use the classic "turntable" (azimuth-elevation) mouse rotation for 3-D plots
+# instead of the matplotlib >= 3.10 default ("arcball"). Guarded so the code
+# still runs on matplotlib < 3.10, where turntable is the only rotation style.
+try:
+    matplotlib.rcParams["axes3d.mouserotationstyle"] = "azel"
+except (KeyError, ValueError):
+    pass
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from mpl_toolkits.mplot3d import Axes3D          # noqa: F401 (registers 3-D projection)
@@ -105,6 +114,7 @@ class OptionPricingCalculator:
         # Cached market values (not the tk.Vars – avoids destroying them)
         self._spot_from_ib: float | None = None
         self._vol_from_ib:  float | None = None
+        self._last_fetched_ticker: str | None = None  # to detect underlying switch
 
         # ── Input tk variables ──
         self.current_price   = tk.DoubleVar(value=100.0)
@@ -137,6 +147,31 @@ class OptionPricingCalculator:
 
         self._setup_styles()
         self._setup_ui()
+
+        # Auto-refresh the P&L payoff chart whenever any pricing input changes
+        # (incl. spot/vol updated by a market-data fetch). Debounced so typing
+        # or a Calculate run doesn't trigger a redraw on every keystroke.
+        self._payoff_refresh_job = None
+        for _var in (self.current_price, self.strike_price,
+                     self.time_to_expiry, self.risk_free_rate,
+                     self.volatility, self.option_type):
+            _var.trace_add("write", self._schedule_payoff_refresh)
+
+    # ---------------------------------------------------- payoff auto-refresh --
+    def _schedule_payoff_refresh(self, *_):
+        """Debounce rapid input changes into a single payoff redraw."""
+        if getattr(self, "_payoff_refresh_job", None) is not None:
+            try:
+                self.root.after_cancel(self._payoff_refresh_job)
+            except Exception:
+                pass
+        self._payoff_refresh_job = self.root.after(250, self._auto_refresh_payoff)
+
+    def _auto_refresh_payoff(self):
+        self._payoff_refresh_job = None
+        # Guard: only redraw once the payoff chart widgets have been built.
+        if hasattr(self, "_payoff_canvas"):
+            self._refresh_payoff()
 
     # --------------------------------------------------------------- styles --
     def _setup_styles(self):
@@ -541,7 +576,7 @@ class OptionPricingCalculator:
             sig   = float(self.volatility.get())
             opt   = self.option_type.get()
             prem  = float(self.prem_paid_var.get() or 0)
-        except ValueError:
+        except (ValueError, tk.TclError):
             ax.set_title("Enter valid parameters first",
                          color=c["fg"], fontsize=10)
             self._payoff_canvas.draw()
@@ -2207,15 +2242,29 @@ class OptionPricingCalculator:
             self._spot_from_ib = hist[1][-1]["close"]
             self.current_price.set(self._spot_from_ib)
             self.fetched_price_var.set(f"Spot:  ${self._spot_from_ib:.2f}")
-            self._update_status(
-                f"{ticker} spot price: ${self._spot_from_ib:.2f}")
+
+            # On an underlying switch (new ticker), snap the strike to ATM so the
+            # payoff chart is sensible for the new price scale. Re-fetching the
+            # same ticker leaves a deliberately-set strike untouched.
+            if ticker != self._last_fetched_ticker:
+                atm_strike = round(self._spot_from_ib, 2)
+                self.strike_price.set(atm_strike)
+                self._update_status(
+                    f"{ticker} spot ${self._spot_from_ib:.2f} – "
+                    f"strike reset to ATM {atm_strike:.2f}")
+            else:
+                self._update_status(
+                    f"{ticker} spot price: ${self._spot_from_ib:.2f}")
+            self._last_fetched_ticker = ticker
         else:
             self._update_status("No price data received from IB.")
 
         if 2 in hist and hist[2]:
             raw_vol = hist[2][-1]["close"]
-            # IB returns vol as a percentage (e.g. 23.4 means 23.4%)
-            self._vol_from_ib = raw_vol / 1  
+            # IB may return IV either as a decimal fraction (0.234) or as
+            # percentage points (23.4). Black-Scholes needs a decimal, so
+            # normalize: anything > 2.0 is treated as percentage points.
+            self._vol_from_ib = raw_vol / 100.0 if raw_vol > 2.0 else raw_vol
             self.volatility.set(self._vol_from_ib)
             self.fetched_vol_var.set(f"IV:    {self._vol_from_ib:.2%}")
             self._update_status(
